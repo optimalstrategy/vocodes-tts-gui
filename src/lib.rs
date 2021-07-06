@@ -1,7 +1,13 @@
+use std::time::Instant;
+
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use eframe::{egui, epi};
 
 mod voices;
+
+/// The number of seconds after which the connection will be dropped.
+/// This is required since the TTS service sometimes hangs up forever for no apparent reason.
+pub const TTS_TIMEOUT_SECONDS: u64 = 180;
 
 /// A text prompt submitted by the user.
 #[derive(Debug)]
@@ -47,7 +53,10 @@ fn spawn_downloader_thread() -> TtsSubmitter {
     };
 
     std::thread::spawn(move || {
-        let client = reqwest::blocking::Client::new();
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(TTS_TIMEOUT_SECONDS))
+            .build()
+            .unwrap();
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
@@ -129,14 +138,29 @@ struct Error {
 }
 
 /// The current state of the GUI.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 enum Status {
     /// Idle, the program is waiting for a prompt.
     Idle,
     /// Processing, the program is currently processing a prompt.
-    Processing,
+    Processing(Instant),
     /// Success, the program has finished processing a prompt.
     Success,
+}
+
+impl std::fmt::Debug for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Status::Idle => write!(f, "Idle"),
+            Status::Processing(instant) => write!(
+                f,
+                "Processing [{:0>3}s / {}s]",
+                instant.elapsed().as_secs(),
+                TTS_TIMEOUT_SECONDS
+            ),
+            Status::Success => write!(f, "Success"),
+        }
+    }
 }
 
 /// The state of the GUI.
@@ -189,6 +213,19 @@ impl VoCodesTts {
             prefix,
             date.format("%Y-%m-%d-%H%M%S")
         )
+    }
+
+    fn clean_prompt(prompt: &str) -> String {
+        prompt
+            .replace(|c: char| c.is_ascii_whitespace(), " ")
+            .chars()
+            .filter(|c| {
+                c.is_ascii_digit()
+                    || c.is_ascii_alphabetic()
+                    || c.is_ascii_whitespace()
+                    || [',', '.', '!', '?', '$', '\''].contains(c)
+            })
+            .collect::<String>()
     }
 }
 
@@ -273,18 +310,18 @@ impl epi::App for VoCodesTts {
             ui.label("Enter the filename: ");
             ui.text_edit_singleline(filename);
 
-            if *status == Status::Processing {
+            if matches!(status, Status::Processing(_)) {
                 ui.output().cursor_icon = egui::CursorIcon::Progress;
             } else {
                 ui.output().cursor_icon = egui::CursorIcon::Default;
             }
 
-            ui.set_enabled(!(*status == Status::Processing) && !prompt.is_empty());
+            ui.set_enabled(!matches!(status, Status::Processing(_)) && !prompt.is_empty());
 
             ui.horizontal(|ui| {
                 if ui.button("Download").clicked() {
                     if let Err(e) = submitter.prompt_tx.send(TtsPrompt {
-                        prompt: prompt.clone(),
+                        prompt: Self::clean_prompt(prompt),
                         voice: *voice,
                         filename: filename.clone(),
                     }) {
@@ -295,12 +332,12 @@ impl epi::App for VoCodesTts {
                             acknowledged: false,
                         });
                     }
-                    *status = Status::Processing;
+                    *status = Status::Processing(Instant::now());
                 }
                 ui.add(
                     egui::Label::new(format!("(status: {:?})", status)).text_color(match *status {
                         Status::Idle => egui::Color32::WHITE,
-                        Status::Processing => egui::Color32::YELLOW,
+                        Status::Processing(_) => egui::Color32::YELLOW,
                         Status::Success => egui::Color32::GREEN,
                     }),
                 );
