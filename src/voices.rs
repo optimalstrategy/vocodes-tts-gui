@@ -58,6 +58,8 @@ lazy_static::lazy_static! {
         voices.insert("snake", "solid-snake");
         voices.insert("snape", "severus-snape");
         voices.insert("sonic", "sonic");
+        voices.insert("tails", "tails");
+        voices.insert("knuckles", "knuckles");
         voices.insert("spongebob", "spongebob-squarepants");
         voices.insert("squidward", "squidward");
         voices.insert("stein", "ben-stein");
@@ -68,6 +70,7 @@ lazy_static::lazy_static! {
         voices.insert("tucker", "tucker-carlson");
         voices.insert("tupac", "tupac-shakur");
         voices.insert("vegeta", "vegeta");
+        voices.insert("goku", "goku");
         voices.insert("white", "betty-white");
         voices.insert("wiseau", "tommy-wiseau");
         voices.insert("wizard", "wizard");

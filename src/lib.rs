@@ -3,41 +3,36 @@ use eframe::{egui, epi};
 
 mod voices;
 
-fn generate_filename(voice: &str, content: &str) -> String {
-    let prefix = content
-        .split_whitespace()
-        .take(4)
-        .map(|s| s.to_ascii_lowercase())
-        .collect::<Vec<_>>()
-        .join("_");
-
-    let date = chrono::Local::now();
-    format!(
-        "{}_{}_{}.wav",
-        voice,
-        prefix,
-        date.format("%Y-%m-%d-%H%M%S")
-    )
-}
-
+/// A text prompt submitted by the user.
 #[derive(Debug)]
 struct TtsPrompt {
+    /// The voice key to use
     voice: &'static str,
+    /// The text to speak.
     prompt: String,
+    /// The name of the resulting .wav file.
     filename: String,
 }
 type TtsResult = Result<(), Error>;
 
+/// This struct is used by the GUI to submit prompts.
 struct TtsSubmitter {
+    /// The channel to submit the prompt.
     prompt_tx: Sender<TtsPrompt>,
+    /// The channel to receive the result.
     result_rx: Receiver<TtsResult>,
 }
 
+/// This struct is used by the downloader thread to receive prompts and send back results.
 struct TtsReceiver {
+    /// The channel to receive prompts.
     prompt_rx: Receiver<TtsPrompt>,
+    /// The channel to send back results.
     result_tx: Sender<TtsResult>,
 }
 
+/// Spawns a download thread and returns a struct holding the prompt sender and result receiver.
+/// The thread will be stopped automatically when the sender is destroyed.
 fn spawn_downloader_thread() -> TtsSubmitter {
     let (prompt_tx, prompt_rx) = unbounded();
     let (result_tx, result_rx) = unbounded();
@@ -121,30 +116,47 @@ fn spawn_downloader_thread() -> TtsSubmitter {
     submitter
 }
 
+/// A struct containing the information about an error and two metadata fields.
 struct Error {
+    /// The title of the error window.
     title: String,
+    /// The error message itself
     message: String,
+    /// Whether the program should exit after the user acknowledges the error.
     should_exit: bool,
+    /// Whether the error has been acknowledged by the user.
     acknowledged: bool,
 }
 
+/// The current state of the GUI.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Status {
+    /// Idle, the program is waiting for a prompt.
     Idle,
+    /// Processing, the program is currently processing a prompt.
     Processing,
+    /// Success, the program has finished processing a prompt.
     Success,
 }
 
+/// The state of the GUI.
 pub struct VoCodesTts {
+    /// The struct to submit prompts.
     submitter: TtsSubmitter,
+    /// The current prompt.
     prompt: String,
+    /// The currently selected voice.
     voice: &'static str,
+    /// The filename to save the audio to.
     filename: String,
+    /// The current error, if any.
     error: Option<Error>,
+    /// The status of the GUI.
     status: Status,
 }
 
 impl VoCodesTts {
+    /// Displays the given error, optionally exiting the program after the user acknowledges it.
     fn display_error(ctx: &egui::CtxRef, frame: &mut epi::Frame<'_>, error: &mut Error) {
         egui::Window::new(&error.title).show(ctx, |ui| {
             ui.add(
@@ -160,6 +172,24 @@ impl VoCodesTts {
             }
         });
     }
+
+    /// Generates af filename for the given voice and content pair, using the first 5 words of the message to start the filename.
+    fn generate_filename(voice: &str, content: &str) -> String {
+        let prefix = content
+            .split_whitespace()
+            .take(4)
+            .map(|s| s.to_ascii_lowercase())
+            .collect::<Vec<_>>()
+            .join("_");
+
+        let date = chrono::Local::now();
+        format!(
+            "{}_{}_{}.wav",
+            voice,
+            prefix,
+            date.format("%Y-%m-%d-%H%M%S")
+        )
+    }
 }
 
 impl Default for VoCodesTts {
@@ -169,7 +199,7 @@ impl Default for VoCodesTts {
             error: None,
             voice: "sonic",
             prompt: "A test message".to_owned(),
-            filename: generate_filename("sonic", "A test message"),
+            filename: Self::generate_filename("sonic", "A test message"),
             status: Status::Idle,
         }
     }
@@ -177,7 +207,7 @@ impl Default for VoCodesTts {
 
 impl epi::App for VoCodesTts {
     fn name(&self) -> &str {
-        "egui template"
+        "Vo.Codes TTS Downloader"
     }
 
     fn update(&mut self, ctx: &egui::CtxRef, frame: &mut epi::Frame<'_>) {
@@ -220,7 +250,11 @@ impl epi::App for VoCodesTts {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.set_style(egui::Style::default());
-            ui.heading("Vo.Codes TTS Downloader");
+            ui.heading(concat!(
+                "Vo.Codes TTS Downloader (",
+                env!("CARGO_PKG_VERSION"),
+                ")"
+            ));
 
             let prev_voice = *voice;
             egui::ComboBox::from_label("Choose a voice")
@@ -233,7 +267,7 @@ impl epi::App for VoCodesTts {
 
             ui.label("Enter your message: ");
             if ui.text_edit_multiline(prompt).changed() || *voice != prev_voice {
-                *filename = generate_filename(voice, &prompt);
+                *filename = Self::generate_filename(voice, &prompt);
             }
 
             ui.label("Enter the filename: ");
@@ -245,7 +279,7 @@ impl epi::App for VoCodesTts {
                 ui.output().cursor_icon = egui::CursorIcon::Default;
             }
 
-            ui.set_enabled(!(*status == Status::Processing));
+            ui.set_enabled(!(*status == Status::Processing) && !prompt.is_empty());
 
             ui.horizontal(|ui| {
                 if ui.button("Download").clicked() {
