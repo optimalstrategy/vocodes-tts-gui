@@ -202,7 +202,12 @@ impl VoCodesTts {
         let prefix = content
             .split_whitespace()
             .take(4)
-            .map(|s| s.to_ascii_lowercase())
+            .map(|s| {
+                s.to_ascii_lowercase()
+                    .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+                    .to_owned()
+            })
+            .filter(|w| !w.is_empty())
             .collect::<Vec<_>>()
             .join("_");
 
@@ -304,6 +309,7 @@ impl epi::App for VoCodesTts {
 
             ui.label("Enter your message: ");
             if ui.text_edit_multiline(prompt).changed() || *voice != prev_voice {
+                let prompt = Self::clean_prompt(prompt);
                 *filename = Self::generate_filename(voice, &prompt);
             }
 
